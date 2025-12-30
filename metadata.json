@@ -1,0 +1,5 @@
+{
+  "name": "CodiX",
+  "description": "A modern, minimalist logic-based crypto-game where users try to unlock their unique 7-digit code. Features a futuristic UI with neon aesthetics, a hint system, and simulated rounds.",
+  "requestFramePermissions": []
+}
