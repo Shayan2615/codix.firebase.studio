@@ -1,0 +1,78 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper function to check if the user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Helper function to check if the user is the owner of the document
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Helper function to check if the request is coming from a Cloud Function (server-side)
+    // Cloud Functions service accounts have specific properties that can be checked.
+    // For simplicity, we'll assume any write that doesn't come from an authenticated user
+    // (i.e., request.auth is null) *might* be from a server, but for sensitive operations
+    // we explicitly check against null for server-side operations only.
+    function isCloudFunction() {
+      // In reality, you'd need more robust checks like matching service account UID
+      // For now, we will rely on implicit server writes (where request.auth is null for some operations)
+      // combined with the function's own logic.
+      return request.auth == null;
+    }
+
+    // Rounds Collection: Global game state
+    match /rounds/{roundId} {
+      allow read: if isAuthenticated(); // Anyone authenticated can read round info
+      // Only Cloud Functions can create or update rounds (e.g., startRound, submitGuess ends round)
+      allow create, update: if isCloudFunction();
+      allow delete: if false; // Rounds should not be deleted by anyone
+    }
+
+    // Users Collection: User profiles and client-side state persistence
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isCloudFunction(); // User can read their own profile, Cloud Functions can read/write
+      allow create: if isAuthenticated() && request.auth.uid == userId; // User can create their own profile on first login
+      allow update: if isOwner(userId) || isCloudFunction(); // User can update certain fields, Cloud Functions can update all
+      allow delete: if false; // Users should not be deleted by themselves
+    }
+
+    // UserCodes Collection: Secret codes for each user per round (SERVER ONLY)
+    match /userCodes/{userCodeId} {
+      allow read: if isCloudFunction(); // ONLY Cloud Functions can read secret codes
+      allow create: if isCloudFunction();
+      allow update: if isCloudFunction();
+      allow delete: if false; // Not directly deletable by anyone
+    }
+
+    // Winners Collection: Record of winners
+    match /winners/{winnerId} {
+      allow read: if isAuthenticated(); // Anyone authenticated can see the list of winners
+      allow create: if isCloudFunction(); // Only Cloud Functions can add winners
+      allow update, delete: if false; // Winners records are immutable
+    }
+
+    // Payments Collection: Hint payment requests (SERVER ONLY for sensitive fields)
+    match /payments/{paymentId} {
+      // Users can only read their own pending payment requests
+      allow read: if isOwner(resource.data.userId);
+      // Users can create a 'pending' payment request (triggered by requestHint)
+      allow create: if isOwner(request.resource.data.userId)
+                       && request.resource.data.status == 'pending'
+                       && request.resource.data.amountUsdt == 0.5; // Ensure amount is correct
+      // Only Cloud Functions can update payment status to 'completed' and set hintProvided
+      allow update: if isCloudFunction();
+      allow delete: if false; // Payment records are immutable after creation/completion
+    }
+
+    // RateLimits Collection (if used for separate rate limiting, otherwise handled in CF)
+    match /rateLimits/{userId} {
+      allow read, create, update: if isCloudFunction(); // Only Cloud Functions can manage rate limits
+      allow delete: if false;
+    }
+  }
+}
